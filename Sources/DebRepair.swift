@@ -72,7 +72,7 @@ func gzipDecompress(_ data: Data) -> Data? {
         var buffer = [UInt8](repeating: 0, count: 1 << 16)
         while true {
             let n = buffer.withUnsafeMutableBytes { p in
-                gzread(gz, p.baseAddress!, UInt32(buffer.count))
+                gzread(gz, p.baseAddress!, UInt32(p.count))
             }
             if n <= 0 { break }
             out.append(&buffer, count: Int(n))
