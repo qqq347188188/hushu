@@ -1,11 +1,11 @@
 import Foundation
-import Compression
+import zlib
 
 // MARK: - ar 归档解析/重建
 
 struct ArMember {
     let name: String
-    let data: Data
+    var data: Data
 }
 
 func parseAr(_ data: Data) throws -> [ArMember] {
@@ -58,34 +58,48 @@ func buildAr(_ members: [ArMember]) -> Data {
     return out
 }
 
-// MARK: - gzip
+// MARK: - gzip (via zlib)
 
 func gzipDecompress(_ data: Data) -> Data? {
-    let dstSize = max(data.count * 8, 65536)
-    var dst = Data(count: dstSize)
-    let written = data.withUnsafeBytes { (srcRaw: UnsafeRawBufferPointer) -> Int in
-        let src = srcRaw.bindMemory(to: UInt8.self).baseAddress!
-        return dst.withUnsafeMutableBytes { (dstRaw: UnsafeMutableRawBufferPointer) -> Int in
-            let d = dstRaw.bindMemory(to: UInt8.self).baseAddress!
-            return Int(compression_decode_buffer(d, dstSize, src, data.count, nil, COMPRESSION_GZIP))
+    let tmpIn = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString + ".gz")
+    defer { try? FileManager.default.removeItem(at: tmpIn) }
+    do {
+        try data.write(to: tmpIn)
+        guard let gz = gzopen(tmpIn.path, "rb") else { return nil }
+        defer { gzclose(gz) }
+        var out = Data()
+        var buffer = [UInt8](repeating: 0, count: 1 << 16)
+        while true {
+            let n = buffer.withUnsafeMutableBytes { p in
+                gzread(gz, p.baseAddress!, UInt32(buffer.count))
+            }
+            if n <= 0 { break }
+            out.append(&buffer, count: Int(n))
         }
-    }
-    guard written > 0 else { return nil }
-    return dst.subdata(in: 0..<written)
+        return out
+    } catch { return nil }
 }
 
 func gzipCompress(_ data: Data) -> Data? {
-    let dstSize = data.count * 2 + 8192
-    var dst = Data(count: dstSize)
-    let written = data.withUnsafeBytes { (srcRaw: UnsafeRawBufferPointer) -> Int in
-        let src = srcRaw.bindMemory(to: UInt8.self).baseAddress!
-        return dst.withUnsafeMutableBytes { (dstRaw: UnsafeMutableRawBufferPointer) -> Int in
-            let d = dstRaw.bindMemory(to: UInt8.self).baseAddress!
-            return Int(compression_encode_buffer(d, dstSize, src, data.count, nil, COMPRESSION_GZIP))
-        }
+    let tmpIn = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString + ".raw")
+    let tmpOut = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString + ".gz")
+    defer {
+        try? FileManager.default.removeItem(at: tmpIn)
+        try? FileManager.default.removeItem(at: tmpOut)
     }
-    guard written > 0 else { return nil }
-    return dst.subdata(in: 0..<written)
+    do {
+        try data.write(to: tmpIn)
+        guard let gz = gzopen(tmpOut.path, "wb") else { return nil }
+        defer { gzclose(gz) }
+        let written = data.withUnsafeBytes { (p: UnsafeRawBufferPointer) -> Int32 in
+            gzwrite(gz, p.baseAddress!, UInt32(data.count))
+        }
+        guard written == Int32(data.count) else { return nil }
+        return try Data(contentsOf: tmpOut)
+    } catch { return nil }
 }
 
 // MARK: - tar 解析/重建 (ustar)

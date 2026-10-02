@@ -11,7 +11,7 @@ struct DebDocument: FileDocument {
             throw NSError(domain: "DebFixer", code: 1,
                           userInfo: [NSLocalizedDescriptionKey: "没有可导出的文件"])
         }
-        return try FileWrapper(url: url, options: [.withoutMounting])
+        return try FileWrapper(url: url)
     }
 }
 
