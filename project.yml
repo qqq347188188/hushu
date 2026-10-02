@@ -1,0 +1,21 @@
+name: DebFixer
+options:
+  bundleIdPrefix: com.example.debfixer
+targets:
+  DebFixer:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: Sources
+    info:
+      path: Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.debfixer
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        OTHER_LDFLAGS: -lcompression -framework UniformTypeIdentifiers
+        ENABLE_BITCODE: NO
+        VALID_ARCHS: arm64
+        ONLY_ACTIVE_ARCH: NO

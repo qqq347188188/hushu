@@ -1,0 +1,49 @@
+name: Build IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build archive (no code sign)
+        run: |
+          xcodebuild archive \
+            -scheme DebFixer \
+            -archivePath build/DebFixer.xcarchive \
+            -sdk iphoneos \
+            -configuration Release \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES
+
+      - name: Package Payload
+        run: |
+          mkdir -p Payload
+          cp -r build/DebFixer.xcarchive/Products/Applications/DebFixer.app Payload/
+
+      - name: Fake-sign with ldid (for TrollStore)
+        run: |
+          brew install ldid
+          ldid -S Payload/DebFixer.app/DebFixer || true
+
+      - name: Make IPA
+        run: zip -r DebFixer.ipa Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: DebFixer.ipa
+          path: DebFixer.ipa
