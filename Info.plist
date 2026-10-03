@@ -22,7 +22,10 @@
     <string>AppIcon</string>
     <key>UILaunchScreen</key>
     <dict/>
-    <!-- 自定义 .deb 类型导入声明 -->
+    <!-- 让本 App 出现在「文件」App 分享 / 打开方式 中（与局域网互传一致） -->
+    <key>UIFileSharingEnabled</key>
+    <true/>
+    <!-- 自定义 .deb UTI（导入声明，便于系统按扩展名识别） -->
     <key>UTImportedTypeDeclarations</key>
     <array>
         <dict>
@@ -43,27 +46,14 @@
             <key>UTTypeDescription</key>
             <string>Debian Package</string>
         </dict>
-        <!-- 系统可能把 .deb 识别成这个标准 Debian UTI -->
-        <dict>
-            <key>UTTypeIdentifier</key>
-            <string>org.debian.deb-archive</string>
-            <key>UTTypeTagSpecification</key>
-            <dict>
-                <key>public.filename-extension</key>
-                <array>
-                    <string>deb</string>
-                </array>
-            </dict>
-            <key>UTTypeConformsTo</key>
-            <array>
-                <string>public.data</string>
-                <string>public.archive</string>
-            </array>
-            <key>UTTypeDescription</key>
-            <string>Debian Package</string>
-        </dict>
     </array>
-    <!-- 声明本 App 能打开的各种 .deb 候选 UTI，确保出现在分享/打开方式里 -->
+    <!--
+      文档类型（Open In / “用…打开” / “打开方式”）：
+      认领 public.data / public.content / public.archive 以及 .deb 专属 UTI，
+      使本程序像局域网互传一样出现在 .deb 的「打开方式」列表中。
+      系统会把文件直接放进 App 沙盒 Documents/Inbox，无需 App Group，
+      TrollStore / 自签下可用。
+    -->
     <key>CFBundleDocumentTypes</key>
     <array>
         <dict>
@@ -79,7 +69,7 @@
                 <string>org.debian.deb-archive</string>
                 <string>public.archive</string>
                 <string>public.data</string>
-                <string>com.pkware.zip-archive</string>
+                <string>public.content</string>
             </array>
         </dict>
     </array>
