@@ -49,10 +49,10 @@
     </array>
     <!--
       文档类型（Open In / “用…打开” / “打开方式”）：
-      认领 public.data / public.content / public.archive 以及 .deb 专属 UTI，
+      认领 public.data / public.content 以及 .deb 专属 UTI，
       使本程序像局域网互传一样出现在 .deb 的「打开方式」列表中。
       系统会把文件直接放进 App 沙盒 Documents/Inbox，无需 App Group，
-      TrollStore / 自签下可用。
+      TrollStore / 自签下可用，主程序用 onOpenURL 读取并修复。
     -->
     <key>CFBundleDocumentTypes</key>
     <array>
@@ -66,10 +66,20 @@
             <key>LSItemContentTypes</key>
             <array>
                 <string>com.example.debfixer.deb</string>
-                <string>org.debian.deb-archive</string>
-                <string>public.archive</string>
                 <string>public.data</string>
                 <string>public.content</string>
+            </array>
+        </dict>
+    </array>
+    <!-- 供「共享扩展」跳回主程序（本仓库暂未接入扩展；保留以便将来启用） -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.example.debfixer</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>debfixer</string>
             </array>
         </dict>
     </array>
