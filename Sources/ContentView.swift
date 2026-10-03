@@ -18,7 +18,7 @@ struct DebDocument: FileDocument {
 struct ContentView: View {
     @State private var showImporter = false
     @State private var showExporter = false
-    @State private var status = "选择 .deb（或从「文件」App 分享到本 App），再点「修复 control 权限」。"
+    @State private var status = "可直接用「用其他 App 打开」把 .deb 传给本 App；若设备未列出本 App，请先把 .deb 存到「文件」App，再点「选择 .deb」导入。"
     @State private var busy = false
     @State private var outputURL: URL?
     @State private var outputName = "fixed.deb"

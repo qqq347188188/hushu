@@ -51,13 +51,14 @@
     <array>
         <dict>
             <key>CFBundleTypeName</key>
-            <string>Debian Package</string>
+            <string>All Files</string>
             <key>CFBundleTypeRole</key>
             <string>Editor</string>
             <key>LSHandlerRank</key>
             <string>Owner</string>
             <key>LSItemContentTypes</key>
             <array>
+                <string>public.data</string>
                 <string>com.example.debfixer.deb</string>
             </array>
         </dict>
