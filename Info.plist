@@ -25,8 +25,8 @@
     <!-- 让本 App 出现在「文件」App 分享 / 打开方式 中（与局域网互传一致） -->
     <key>UIFileSharingEnabled</key>
     <true/>
-    <!-- 自定义 .deb UTI（导入声明，便于系统按扩展名识别） -->
-    <key>UTImportedTypeDeclarations</key>
+    <!-- 把 .deb 定义为本 App 自有的「导出类型」；未知扩展名会被系统识别为该 UTI -->
+    <key>UTExportedTypeDeclarations</key>
     <array>
         <dict>
             <key>UTTypeIdentifier</key>
@@ -41,19 +41,12 @@
             <key>UTTypeConformsTo</key>
             <array>
                 <string>public.data</string>
-                <string>public.archive</string>
             </array>
             <key>UTTypeDescription</key>
             <string>Debian Package</string>
         </dict>
     </array>
-    <!--
-      文档类型（Open In / “用…打开” / “打开方式”）：
-      认领 public.data / public.content 以及 .deb 专属 UTI，
-      使本程序像局域网互传一样出现在 .deb 的「打开方式」列表中。
-      系统会把文件直接放进 App 沙盒 Documents/Inbox，无需 App Group，
-      TrollStore / 自签下可用，主程序用 onOpenURL 读取并修复。
-    -->
+    <!-- 文档类型：Owner 精确认领该 UTI，使其出现在「用其他 App 打开」列表 -->
     <key>CFBundleDocumentTypes</key>
     <array>
         <dict>
@@ -62,12 +55,10 @@
             <key>CFBundleTypeRole</key>
             <string>Editor</string>
             <key>LSHandlerRank</key>
-            <string>Alternate</string>
+            <string>Owner</string>
             <key>LSItemContentTypes</key>
             <array>
                 <string>com.example.debfixer.deb</string>
-                <string>public.data</string>
-                <string>public.content</string>
             </array>
         </dict>
     </array>
