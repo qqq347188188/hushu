@@ -20,3 +20,24 @@ targets:
         ENABLE_BITCODE: NO
         VALID_ARCHS: arm64
         ONLY_ACTIVE_ARCH: NO
+        CODE_SIGN_ENTITLEMENTS: DebFixer.entitlements
+  ShareExtension:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: ShareExtension
+        excludes:
+          - Info.plist
+          - ShareExtension.entitlements
+    info:
+      path: ShareExtension/Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.debfixer.ShareExtension
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        ENABLE_BITCODE: NO
+        VALID_ARCHS: arm64
+        ONLY_ACTIVE_ARCH: NO
+        CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtension.entitlements

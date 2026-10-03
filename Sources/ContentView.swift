@@ -83,11 +83,16 @@ struct ContentView: View {
                       contentType: debType,
                       defaultFilename: outputName) { _ in }
         .onOpenURL { url in
-            // 从「文件」App 分享 / 打开方式 进来：URL 位于本 App 沙盒 Inbox，
-            // 不是 security-scoped 的，无需 startAccessing，直接处理即可。
-            selectedURL = url
-            selectedName = url.lastPathComponent
-            runRepair()
+            if url.scheme == "debfixer" {
+                // 由共享扩展「用 DebFixer 打开」跳回：读取 App Group 收件箱里的 deb
+                handleSharedInbox()
+            } else {
+                // 从「文件」App 分享 / 打开方式 进来：URL 位于本 App 沙盒 Inbox，
+                // 不是 security-scoped 的，无需 startAccessing，直接处理即可。
+                selectedURL = url
+                selectedName = url.lastPathComponent
+                runRepair()
+            }
         }
     }
 
@@ -100,6 +105,29 @@ struct ContentView: View {
         } catch {
             status = "选择失败：\(error.localizedDescription)"
         }
+    }
+
+    /// 由共享扩展「用 DebFixer 打开」跳回时调用：读取 App Group 收件箱里的 deb。
+    /// App Group 不可用时（TrollStore / 自签）containerURL 返回 nil，此时提示改用「打开方式」。
+    func handleSharedInbox() {
+        guard let container = FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: "group.com.example.debfixer") else {
+            status = "未收到文件：当前安装方式未启用 App Group，请改用「打开方式」把 .deb 传入 DebFixer（系统会直接放进 App 沙盒，可正常修复）。"
+            return
+        }
+        let inbox = container.appendingPathComponent("Inbox", isDirectory: true)
+        let manifestURL = inbox.appendingPathComponent("manifest.json")
+        guard let data = try? Data(contentsOf: manifestURL),
+              let manifest = try? JSONSerialization.jsonObject(with: data) as? [[String: String]],
+              let first = manifest.first,
+              let rel = first["relativePath"] else {
+            status = "未找到共享的 .deb，请确认已从分享扩展选择了文件。"
+            return
+        }
+        let fileURL = inbox.appendingPathComponent(rel)
+        selectedURL = fileURL
+        selectedName = first["name"] ?? fileURL.lastPathComponent
+        runRepair()
     }
 
     func runRepair() {
