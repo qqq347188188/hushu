@@ -46,8 +46,11 @@ def iter_layout_entries(layout):
     """遍历 layout 下除 DEBIAN 外的所有条目，yield (abspath, arcname)。"""
     for root, dirs, files in os.walk(layout):
         rel_root = os.path.relpath(root, layout)
-        if rel_root.split(os.sep)[0] == "DEBIAN":
+        if rel_root == "DEBIAN":
             continue
+        # 在根层直接剔除 DEBIAN，既不进入也不把它作为目录条目写入 data.tar
+        if rel_root == ".":
+            dirs[:] = [d for d in dirs if d != "DEBIAN"]
         for name in files:
             abspath = os.path.join(root, name)
             arcname = os.path.relpath(abspath, layout).replace(os.sep, "/")
