@@ -65,7 +65,7 @@ def build_data_tar(layout):
     """构建 data.tar.gz，保留权限/属主/符号链接；返回 (bytes, md5sums)。"""
     buf = io.BytesIO()
     md5s = []
-    with tarfile.open(fileobj=buf, mode="w:gz") as t:
+    with tarfile.open(fileobj=buf, mode="w:gz", format=tarfile.GNU_FORMAT) as t:
         for abspath, arcname in iter_layout_entries(layout):
             ti = t.gettarinfo(name=abspath, arcname=arcname)
             ti.uid = ti.gid = 0
@@ -83,7 +83,7 @@ def build_data_tar(layout):
 def build_control_tar(layout, md5s):
     """构建 control.tar.gz，含 control 与可选的 md5sums（权限 0644，属主 root）。"""
     buf = io.BytesIO()
-    with tarfile.open(fileobj=buf, mode="w:gz") as t:
+    with tarfile.open(fileobj=buf, mode="w:gz", format=tarfile.GNU_FORMAT) as t:
         with open(os.path.join(layout, "DEBIAN", "control"), "rb") as f:
             cd = f.read()
         ci = tarfile.TarInfo("control")
