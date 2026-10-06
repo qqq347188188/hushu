@@ -7,13 +7,16 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14       # 需要 macOS runner 才能编译 iOS app
+    runs-on: macos-15       # 必须 Xcode 16+，才能打开 objectVersion 77 的工程格式
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Show Xcode version
+        run: xcodebuild -version
 
       # 1) 用 Xcode 编译 Hoshu.app（关闭签名，后面再 ad-hoc 签名）
       - name: Build Hoshu.app
