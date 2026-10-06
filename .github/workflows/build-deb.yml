@@ -48,12 +48,13 @@ jobs:
           codesign -s - --entitlements Hoshu-main/entitlements.plist "$APP"
 
       # 4) 放入 layout/Applications，交给 build_deb.py 打包
+      # 4) 放入 layout/var/jb/Applications（rootless 无根路径），交给 build_deb.py 打包
       - name: Stage into layout
         run: |
           APP="${{ steps.app.outputs.app }}"
-          mkdir -p Hoshu-main/layout/Applications
-          rm -rf Hoshu-main/layout/Applications/Hoshu.app
-          cp -R "$APP" Hoshu-main/layout/Applications/Hoshu.app
+          mkdir -p Hoshu-main/layout/var/jb/Applications
+          rm -rf Hoshu-main/layout/var/jb/Applications/Hoshu.app
+          cp -R "$APP" Hoshu-main/layout/var/jb/Applications/Hoshu.app
 
       # 5) 纯标准库打包成 .deb（无需 Theos / dpkg）
       - name: Build .deb
