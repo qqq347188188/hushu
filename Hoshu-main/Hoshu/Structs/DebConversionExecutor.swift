@@ -112,9 +112,25 @@ final class DebConversionExecutor {
                 return
             }
 
+            // 转换前自动修复 control 权限（放宽 DEBIAN 脚本权限），
+            // 避免 rootless-patcher 读取 postinst/postrm/control 时权限不足。
+            // 修复失败（如 tar 缺失）则回退原始 deb，不阻断转换。
+            let targetPath: String
+            let repairedDebPath: String?
+            if let fixed = try? DebControlPermissionRepair.repair(debPath: filePath) {
+                targetPath = fixed
+                repairedDebPath = fixed
+                await MainActor.run {
+                    self.outputHandler("[+] Auto-repaired control permissions before conversion.\n")
+                }
+            } else {
+                targetPath = filePath
+                repairedDebPath = nil
+            }
+
             AuxiliaryExecute.spawn(
                 command: "/var/jb/usr/local/bin/rootless-patcher",
-                args: [filePath],
+                args: [targetPath],
                 environment: ["PATH": environmentPath.joined(separator: ":")],
                 timeout: 0,
                 stdoutBlock: { [weak self] stdout in
@@ -132,7 +148,11 @@ final class DebConversionExecutor {
                         self.outputHandler("[+] Error: \(stderr)")
                     }
                 }
-            ) { [weak self] _ in
+            ) { [weak self, repairedDebPath] _ in
+                // 清理自动修复产生的临时 deb
+                if let repairedDebPath {
+                    try? FileManager.default.removeItem(atPath: repairedDebPath)
+                }
                 guard let self = self else { return }
                 Task { @MainActor in
                     guard self.isRunning else { return }
