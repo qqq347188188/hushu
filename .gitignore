@@ -1,0 +1,19 @@
+# 构建产物
+*.deb
+
+# 无关的本地文件
+hoshu.zip
+~$*
+
+# 本地构建缓存
+DerivedData/
+build/
+.cache/
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 系统
+.DS_Store
+Thumbs.db

@@ -1,0 +1,12 @@
+.theos
+.vscode
+.DS_Store
+
+xcuserdata
+xcuserdata/*
+*.xcuserstate
+UserInterfaceState.xcuserstate
+
+buildServer.json
+
+/packages

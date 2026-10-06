@@ -1,0 +1,63 @@
+name: Build Hoshu .deb
+
+on:
+  workflow_dispatch:        # 手动触发
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: macos-14       # 需要 macOS runner 才能编译 iOS app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      # 1) 用 Xcode 编译 Hoshu.app（关闭签名，后面再 ad-hoc 签名）
+      - name: Build Hoshu.app
+        run: |
+          cd Hoshu-main
+          xcodebuild \
+            -project Hoshu.xcodeproj \
+            -scheme Hoshu \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            MARKETING_VERSION=1.0.0 \
+            IPHONEOS_DEPLOYMENT_TARGET=15.0 \
+            build
+
+      # 2) 找到编译产物
+      - name: Locate built .app
+        id: app
+        run: |
+          APP=$(find ~/Library/Developer/Xcode/DerivedData -name 'Hoshu.app' -type d | head -n1)
+          echo "app=$APP" >> "$GITHUB_OUTPUT"
+          echo "找到: $APP"
+
+      # 3) 带 entitlements 做 ad-hoc 签名（Hoshu 需要 persona/sandbox 等权限）
+      - name: Ad-hoc codesign with entitlements
+        run: |
+          APP="${{ steps.app.outputs.app }}"
+          codesign -s - --entitlements Hoshu-main/entitlements.plist "$APP"
+
+      # 4) 放入 layout/Applications，交给 build_deb.py 打包
+      - name: Stage into layout
+        run: |
+          APP="${{ steps.app.outputs.app }}"
+          mkdir -p Hoshu-main/layout/Applications
+          rm -rf Hoshu-main/layout/Applications/Hoshu.app
+          cp -R "$APP" Hoshu-main/layout/Applications/Hoshu.app
+
+      # 5) 纯标准库打包成 .deb（无需 Theos / dpkg）
+      - name: Build .deb
+        run: python3 build_deb.py Hoshu-main/layout .
+
+      - name: Upload .deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: hoshu-deb
+          path: '*.deb'
