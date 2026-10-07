@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct TerminalView: View {
     let filePath: String
@@ -8,6 +9,7 @@ struct TerminalView: View {
     @State private var cursorVisible = true
     @State private var terminalExecutor: DebConversionExecutor?
     @State private var lastOutputLength = 0
+    @State private var copied = false
     @EnvironmentObject private var appState: AppState
 
     let timer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
@@ -19,6 +21,13 @@ struct TerminalView: View {
 
             VStack {
                 HStack {
+                    Button(action: copyLog) {
+                        Image(systemName: copied ? "checkmark.circle.fill" : "doc.on.doc")
+                            .foregroundStyle(.white)
+                            .font(.system(size: 20))
+                            .padding()
+                    }
+
                     Spacer()
 
                     if isRunning {
@@ -72,6 +81,7 @@ struct TerminalView: View {
                             .padding(.horizontal, 8)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .id("output")
+                            .textSelection(.enabled)
                         }
                         .onChange(of: outputText) { newValue in
                             if newValue.count > lastOutputLength {
@@ -114,6 +124,14 @@ struct TerminalView: View {
         }
         .onAppear {
             startTerminalExecution()
+        }
+    }
+
+    private func copyLog() {
+        UIPasteboard.general.string = outputText
+        copied = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            copied = false
         }
     }
 
