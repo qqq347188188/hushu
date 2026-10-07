@@ -56,15 +56,22 @@ enum DebControlPermissionRepair {
             throw RepairError.extractFailed(stderr: xRes.stderr, exitCode: xRes.exitCode)
         }
 
-        // 2) 放宽 DEBIAN/ 下所有文件权限为 0777
+        // 2) 放宽 DEBIAN/ 下文件权限：
+        //    - 维护者脚本（preinst/postinst/prerm/postrm）必须在 0555..0775 之间，
+        //      否则 dpkg-deb -b 会拒绝（"权限位是 777"）。设为 0755 即可读可执行，
+        //      也保证 rootless-patcher 以 mobile 身份能读取脚本内容。
+        //    - 其余文件（control/conffiles/triggers 等）设为 0666，保证 rootless-patcher
+        //      解包后（owner 可能是 root）mobile 也能读写 control（它需要改写该文件）。
         let debianDir = extractDir + "/DEBIAN"
         guard fm.fileExists(atPath: debianDir) else {
             throw RepairError.noDebianDir
         }
+        let scriptNames: Set<String> = ["preinst", "postinst", "prerm", "postrm"]
         let entries = try fm.contentsOfDirectory(atPath: debianDir)
         for entry in entries {
             let path = debianDir + "/" + entry
-            try fm.setAttributes([.posixPermissions: 0o777], ofItemAtPath: path)
+            let mode: Int = scriptNames.contains(entry) ? 0o755 : 0o666
+            try fm.setAttributes([.posixPermissions: mode], ofItemAtPath: path)
         }
 
         // 3) 重新打包为合法 .deb
