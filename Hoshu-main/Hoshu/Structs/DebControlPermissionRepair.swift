@@ -50,18 +50,26 @@ enum DebControlPermissionRepair {
         }
         let controlName = members[controlIdx].name
         let ext = (controlName as NSString).pathExtension.lowercased()
-        let isPlainTar = controlName.lowercased().hasSuffix(".tar")
+
+        // 用 gzip 魔数（0x1f 0x8b）判定，而非依赖扩展名。否则扩展名异常时会
+        // 误入 tar 回退，而 rootless 下 tar 调系统根 /usr/bin/gzip 会报
+        // "Cannot exec: No such file or directory"。
+        let rawData = members[controlIdx].data
+        let isGzip = rawData.count >= 2 && rawData[0] == 0x1f && rawData[1] == 0x8b
 
         let fixedControlData: Data
-        if ext == "gz" || isPlainTar {
-            // 纯 Swift：zlib 解压 + tar 头权限修补 + 重新压缩，无外部依赖
-            var tarData = ext == "gz" ? try gunzip(members[controlIdx].data) : members[controlIdx].data
+        if isGzip {
+            // 纯 Swift（zlib）：解压 -> 改权限 -> 重新压缩，不依赖任何外部程序
+            var tarData = try gunzip(rawData)
             tarData = try patchTarPermissions(in: tarData)
-            fixedControlData = ext == "gz" ? try gzip(tarData) : tarData
+            fixedControlData = try gzip(tarData)
+        } else if looksLikeTar(rawData) {
+            // 未压缩的纯 tar
+            fixedControlData = try patchTarPermissions(in: rawData)
         } else {
-            // xz/zst/bz2 等：回退系统 tar
+            // xz / zst / bz2 等：回退外部 tar，并显式指定压缩程序绝对路径
             fixedControlData = try rebuildControlWithTar(
-                controlData: members[controlIdx].data,
+                controlData: rawData,
                 compression: ext
             )
         }
@@ -220,17 +228,24 @@ enum DebControlPermissionRepair {
         let ctrlPath = workDir + "/control.orig"
         try controlData.write(to: URL(fileURLWithPath: ctrlPath))
 
-        var xflags = [String]()
+        // 显式指定压缩程序绝对路径，避免 rootless 下 tar 去系统根找 gzip/xz 而失败
+        let progArg: String?
         switch compression {
-        case "gz": xflags.append("-z")
-        case "xz": xflags.append("-J")
-        case "zst": xflags.append("--zstd")
-        case "bz2": xflags.append("-j")
-        default: break
+        case "gz": progArg = try? locateCompressProgram("gzip")
+        case "xz": progArg = try? locateCompressProgram("xz")
+        case "zst": progArg = try? locateCompressProgram("zstd")
+        case "bz2": progArg = try? locateCompressProgram("bzip2")
+        default: progArg = nil
         }
+
+        var xargs = [String]()
+        if let prog = progArg {
+            xargs += ["--use-compress-program", prog]
+        }
+        xargs += ["-xf", ctrlPath, "-C", ctrlExtract]
         let xRes = AuxiliaryExecute.spawn(
             command: tar,
-            args: xflags + ["-xf", ctrlPath, "-C", ctrlExtract],
+            args: xargs,
             environment: prefixedEnvironment()
         )
         guard xRes.exitCode == 0 else {
@@ -239,12 +254,8 @@ enum DebControlPermissionRepair {
 
         let fixedControlPath = workDir + "/control.fixed"
         var cargs = [String]()
-        switch compression {
-        case "gz": cargs.append("-z")
-        case "xz": cargs.append("-J")
-        case "zst": cargs.append("--zstd")
-        case "bz2": cargs.append("-j")
-        default: break
+        if let prog = progArg {
+            cargs += ["--use-compress-program", prog]
         }
         cargs += [
             "-cf", fixedControlPath, "-C", ctrlExtract,
@@ -314,6 +325,28 @@ enum DebControlPermissionRepair {
     }
 
     // MARK: - 工具定位（仅 xz/zst/bz2 回退路径使用）
+
+    /// 判断数据是否像未压缩的 tar 归档（gzip 魔数之后的兜底判定）
+    private static func looksLikeTar(_ data: Data) -> Bool {
+        guard data.count >= 512 else { return false }
+        let magic = data.subdata(in: 257 ..< 262)
+        if magic == Data("ustar".utf8) { return true }
+        // 退化判断：第一个 header 的 name 字段（0..100）非全零
+        return data.subdata(in: 0 ..< 100).contains(where: { $0 != 0 })
+    }
+
+    private static func locateCompressProgram(_ name: String) throws -> String {
+        let candidates = [
+            "/var/jb/bin/\(name)",
+            "/var/jb/usr/bin/\(name)",
+            "/usr/bin/\(name)",
+            "/bin/\(name)",
+        ]
+        for c in candidates where FileManager.default.fileExists(atPath: c) {
+            return c
+        }
+        throw RepairError.toolMissing("\(name)（请确认越狱环境已安装 \(name)）")
+    }
 
     private static func locateTar() throws -> String {
         let candidates = [
