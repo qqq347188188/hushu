@@ -163,9 +163,7 @@ enum DebControlPermissionRepair {
                     stream.next_out = outPtr.baseAddress
                     stream.avail_out = uInt(chunkSize)
                     let result = inflate(&stream, Z_NO_FLUSH)
-                    if let base = outPtr.baseAddress {
-                        output.append(contentsOf: base ..< base + (chunkSize - Int(stream.avail_out)))
-                    }
+                    output.append(contentsOf: outPtr.prefix(chunkSize - Int(stream.avail_out)))
                     return result
                 }
             } while status == Z_OK
@@ -198,9 +196,7 @@ enum DebControlPermissionRepair {
                     stream.next_out = outPtr.baseAddress
                     stream.avail_out = uInt(chunkSize)
                     let result = deflate(&stream, Z_FINISH)
-                    if let base = outPtr.baseAddress {
-                        output.append(contentsOf: base ..< base + (chunkSize - Int(stream.avail_out)))
-                    }
+                    output.append(contentsOf: outPtr.prefix(chunkSize - Int(stream.avail_out)))
                     return result
                 }
             } while status == Z_OK
