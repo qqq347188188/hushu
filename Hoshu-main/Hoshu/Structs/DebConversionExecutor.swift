@@ -117,15 +117,19 @@ final class DebConversionExecutor {
             // 修复失败（如 tar 缺失）则回退原始 deb，不阻断转换。
             let targetPath: String
             let repairedDebPath: String?
-            if let fixed = try? DebControlPermissionRepair.repair(debPath: filePath) {
+            do {
+                let fixed = try DebControlPermissionRepair.repair(debPath: filePath)
                 targetPath = fixed
                 repairedDebPath = fixed
                 await MainActor.run {
                     self.outputHandler("[+] Auto-repaired control permissions before conversion.\n")
                 }
-            } else {
+            } catch {
                 targetPath = filePath
                 repairedDebPath = nil
+                await MainActor.run {
+                    self.outputHandler("[!] Control permission auto-repair skipped: \(error.localizedDescription)\n")
+                }
             }
 
             AuxiliaryExecute.spawn(
