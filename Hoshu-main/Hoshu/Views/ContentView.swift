@@ -225,6 +225,10 @@ struct ContentView: View {
             title: "Filza",
             bundleIdentifier: "com.tigisoftware.Filza"
         ),
+        ShareDestination(
+            title: "Irisin",
+            bundleIdentifier: "wiki.qaq.irisin"
+        ),
     ]
 
     private func availableThirdPartyShareDestinations() -> [ShareDestination] {
