@@ -220,9 +220,17 @@ enum DebControlPermissionRepair {
         let ctrlPath = workDir + "/control.orig"
         try controlData.write(to: URL(fileURLWithPath: ctrlPath))
 
+        var xflags = [String]()
+        switch compression {
+        case "gz": xflags.append("-z")
+        case "xz": xflags.append("-J")
+        case "zst": xflags.append("--zstd")
+        case "bz2": xflags.append("-j")
+        default: break
+        }
         let xRes = AuxiliaryExecute.spawn(
             command: tar,
-            args: ["-xf", ctrlPath, "-C", ctrlExtract],
+            args: xflags + ["-xf", ctrlPath, "-C", ctrlExtract],
             environment: prefixedEnvironment()
         )
         guard xRes.exitCode == 0 else {
