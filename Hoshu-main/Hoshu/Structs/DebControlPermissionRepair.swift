@@ -1,18 +1,24 @@
 import AuxiliaryExecute
 import Foundation
+import zlib
 
-/// 将 .deb 内 control.tar.* 的权限自动放宽、属主改为 root，从而修复
-/// 因 control 文件权限不足（如 0600 且属主 UID 不存在）导致 Hoshu 用
-/// dpkg-deb 读取时失败的问题。修复范围完全在 Hoshu 内部，无需外部干预。
+/// 将 .deb 内 control.tar.* 的权限自动放宽（0777、属主 root），从而修复
+/// 因 DEBIAN 下 control/postinst/postrm 等文件权限不足导致的问题：
+/// - Hoshu 用 dpkg-deb 读取 control 时失败；
+/// - rootless-patcher 转换时无法读取/改写 DEBIAN 脚本
+///   （patcher 需要写权限，故统一放宽为 0777 而非 0644）。
 ///
-/// 原理与独立的 HoshuDebFixer 工具一致：重新打包 ar 归档，仅替换
-/// control.tar.* 成员，把其内所有成员权限设为 0644、属主/组设为 0(root)。
+/// .gz / 未压缩 tar 走纯 Swift 路径（zlib + tar 头字节修补），
+/// 不依赖任何外部工具；.xz / .zst / .bz2 回退用系统 tar 重新打包。
 enum DebControlPermissionRepair {
     enum RepairError: LocalizedError {
         case toolMissing(String)
         case arParse(String)
         case noControlMember
         case repairFailed(stderr: String, exitCode: Int)
+        case gunzipFailed
+        case gzipFailed
+        case tarParse(String)
 
         var errorDescription: String? {
             switch self {
@@ -24,29 +30,194 @@ enum DebControlPermissionRepair {
                 return "未找到 control.tar 成员，无需修复"
             case .repairFailed(let s, let c):
                 return "control 权限修复失败（退出码 \(c)）：\(s)"
+            case .gunzipFailed:
+                return "control.tar.gz 解压失败"
+            case .gzipFailed:
+                return "control.tar.gz 重新压缩失败"
+            case .tarParse(let m):
+                return "解析 control.tar 失败：\(m)"
             }
         }
     }
 
-    /// 修复 .deb 的 control 权限，返回修复后新 .deb 的临时路径（调用方负责清理）。
-    /// 若无法修复（工具缺失 / 无 control 成员）则抛出。
+    /// 修复 .deb 的 control 权限，返回修复后新 .deb 的路径（调用方负责清理）。
     static func repair(debPath: String) throws -> String {
         let fm = FileManager.default
-        let workDir = (debPath as NSString).deletingLastPathComponent
-            + "/.hoshu_repair_\(UUID().uuidString)"
-        try fm.createDirectory(atPath: workDir, withIntermediateDirectories: true)
-        defer { try? fm.removeItem(atPath: workDir) }
 
-        // 1. 解析 ar 归档，取出 control.tar.* 成员
-        let members = try parseAR(at: debPath)
+        var members = try parseAR(at: debPath)
         guard let controlIdx = members.firstIndex(where: { $0.name.hasPrefix("control.tar") }) else {
             throw RepairError.noControlMember
         }
         let controlName = members[controlIdx].name
-        let controlData = members[controlIdx].data
         let ext = (controlName as NSString).pathExtension.lowercased()
+        let isPlainTar = controlName.lowercased().hasSuffix(".tar")
 
-        // 2. 用 tar 解包 control 并重新打包（强制权限/属主）
+        let fixedControlData: Data
+        if ext == "gz" || isPlainTar {
+            // 纯 Swift：zlib 解压 + tar 头权限修补 + 重新压缩，无外部依赖
+            var tarData = ext == "gz" ? try gunzip(members[controlIdx].data) : members[controlIdx].data
+            tarData = try patchTarPermissions(in: tarData)
+            fixedControlData = ext == "gz" ? try gzip(tarData) : tarData
+        } else {
+            // xz/zst/bz2 等：回退系统 tar
+            fixedControlData = try rebuildControlWithTar(
+                controlData: members[controlIdx].data,
+                compression: ext
+            )
+        }
+
+        members[controlIdx] = (controlName, fixedControlData)
+        let ordered = members.sorted { orderIndex($0.name) < orderIndex($1.name) }
+        let fixedDeb = debPath + ".fixed.deb"
+        if fm.fileExists(atPath: fixedDeb) { try? fm.removeItem(atPath: fixedDeb) }
+        try buildAR(members: ordered).write(to: URL(fileURLWithPath: fixedDeb))
+        return fixedDeb
+    }
+
+    // MARK: - tar 头权限修补（纯 Swift，无外部依赖）
+
+    /// 遍历 tar 所有成员，把 mode 改为 0777、uid/gid 改为 0，并重写校验和。
+    private static func patchTarPermissions(in raw: Data) throws -> Data {
+        var bytes = [UInt8](raw)
+        var offset = 0
+
+        while offset + 512 <= bytes.count {
+            let header = Array(bytes[offset ..< offset + 512])
+            if header.isEmpty || header.allSatisfy({ $0 == 0 }) { break }
+
+            // 解析 size 字段（offset+124，12 字节八进制）
+            var size = 0
+            var sawDigit = false
+            var sizeValid = true
+            for i in 124 ..< 136 {
+                let b = header[i]
+                if b == 0 || b == 0x20 {
+                    if sawDigit { break }
+                    continue
+                }
+                guard (0x30 ... 0x37).contains(b) else {
+                    sizeValid = false
+                    break
+                }
+                size = size * 8 + Int(b - 0x30)
+                sawDigit = true
+            }
+            guard sizeValid, sawDigit else {
+                throw RepairError.tarParse("成员大小字段解析失败")
+            }
+
+            writeTarField(&bytes, offset: offset + 100, digits: "0000777") // mode
+            writeTarField(&bytes, offset: offset + 108, digits: "0000000") // uid -> root
+            writeTarField(&bytes, offset: offset + 116, digits: "0000000") // gid -> root
+
+            // 重算 checksum：148..<156 按空格计入
+            var sum = 0
+            for i in 0 ..< 512 {
+                sum += (i >= 148 && i < 156) ? Int(0x20) : Int(bytes[offset + i])
+            }
+            var octal = String(sum, radix: 8)
+            if octal.count > 6 { octal = String(octal.suffix(6)) }
+            while octal.count < 6 { octal = "0" + octal }
+            var checksum = Array(octal.utf8)
+            checksum.append(0)
+            checksum.append(0x20)
+            for (i, b) in checksum.enumerated() where offset + 148 + i < bytes.count {
+                bytes[offset + 148 + i] = b
+            }
+
+            offset += 512 + ((size + 511) / 512) * 512
+        }
+        return Data(bytes)
+    }
+
+    /// 写入 8 字节 tar 字段：7 位八进制数字 + '\0'
+    private static func writeTarField(_ bytes: inout [UInt8], offset: Int, digits: String) {
+        var field = Array(digits.utf8)
+        field.append(0)
+        for (i, b) in field.enumerated() where offset + i < bytes.count {
+            bytes[offset + i] = b
+        }
+    }
+
+    // MARK: - zlib gzip（纯 Swift）
+
+    private static func gunzip(_ data: Data) throws -> Data {
+        var stream = z_stream()
+        let initStatus = inflateInit2_(
+            &stream, 47, ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size)
+        )
+        guard initStatus == Z_OK else { throw RepairError.gunzipFailed }
+        defer { inflateEnd(&stream) }
+
+        var input = [UInt8](data)
+        var output = [UInt8]()
+        let chunkSize = 262144
+        var chunk = [UInt8](repeating: 0, count: chunkSize)
+        var status: Int32 = Z_OK
+
+        input.withUnsafeMutableBufferPointer { inPtr in
+            stream.next_in = inPtr.baseAddress
+            stream.avail_in = uInt(inPtr.count)
+            repeat {
+                status = chunk.withUnsafeMutableBufferPointer { outPtr -> Int32 in
+                    stream.next_out = outPtr.baseAddress
+                    stream.avail_out = uInt(chunkSize)
+                    let result = inflate(&stream, Z_NO_FLUSH)
+                    if let base = outPtr.baseAddress {
+                        output.append(contentsOf: base ..< base + (chunkSize - Int(stream.avail_out)))
+                    }
+                    return result
+                }
+            } while status == Z_OK
+        }
+
+        guard status == Z_STREAM_END else { throw RepairError.gunzipFailed }
+        return Data(output)
+    }
+
+    private static func gzip(_ data: Data) throws -> Data {
+        var stream = z_stream()
+        let initStatus = deflateInit2_(
+            &stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 + 16, 8,
+            Z_DEFAULT_STRATEGY, ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size)
+        )
+        guard initStatus == Z_OK else { throw RepairError.gzipFailed }
+        defer { deflateEnd(&stream) }
+
+        var input = [UInt8](data)
+        var output = [UInt8]()
+        let chunkSize = 262144
+        var chunk = [UInt8](repeating: 0, count: chunkSize)
+        var status: Int32 = Z_OK
+
+        input.withUnsafeMutableBufferPointer { inPtr in
+            stream.next_in = inPtr.baseAddress
+            stream.avail_in = uInt(inPtr.count)
+            repeat {
+                status = chunk.withUnsafeMutableBufferPointer { outPtr -> Int32 in
+                    stream.next_out = outPtr.baseAddress
+                    stream.avail_out = uInt(chunkSize)
+                    let result = deflate(&stream, Z_FINISH)
+                    if let base = outPtr.baseAddress {
+                        output.append(contentsOf: base ..< base + (chunkSize - Int(stream.avail_out)))
+                    }
+                    return result
+                }
+            } while status == Z_OK
+        }
+
+        guard status == Z_STREAM_END else { throw RepairError.gzipFailed }
+        return Data(output)
+    }
+
+    // MARK: - 系统 tar 回退（xz / zst / bz2 压缩的 control.tar）
+
+    private static func rebuildControlWithTar(controlData: Data, compression: String) throws -> Data {
+        let fm = FileManager.default
+        let workDir = NSTemporaryDirectory() + "hoshu_repair_\(UUID().uuidString)"
+        try fm.createDirectory(atPath: workDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(atPath: workDir) }
+
         let tar = try locateTar()
         let ctrlExtract = workDir + "/ctrl"
         try fm.createDirectory(atPath: ctrlExtract, withIntermediateDirectories: true)
@@ -64,7 +235,7 @@ enum DebControlPermissionRepair {
 
         let fixedControlPath = workDir + "/control.fixed"
         var cargs = [String]()
-        switch ext {
+        switch compression {
         case "gz": cargs.append("-z")
         case "xz": cargs.append("-J")
         case "zst": cargs.append("--zstd")
@@ -73,7 +244,7 @@ enum DebControlPermissionRepair {
         }
         cargs += [
             "-cf", fixedControlPath, "-C", ctrlExtract,
-            "--no-same-permissions", "--mode=0644",
+            "--no-same-permissions", "--mode=0777",
             "--owner=0", "--group=0", "--numeric-owner", ".",
         ]
         let cRes = AuxiliaryExecute.spawn(
@@ -84,16 +255,7 @@ enum DebControlPermissionRepair {
         guard cRes.exitCode == 0 else {
             throw RepairError.repairFailed(stderr: cRes.stderr, exitCode: cRes.exitCode)
         }
-        let fixedControlData = try Data(contentsOf: URL(fileURLWithPath: fixedControlPath))
-
-        // 3. 重新组装 ar（保持 debian-binary / control / data 顺序，data 原样保留）
-        var rebuilt = members
-        rebuilt[controlIdx] = (controlName, fixedControlData)
-        let ordered = rebuilt.sorted { orderIndex($0.name) < orderIndex($1.name) }
-        let fixedDeb = debPath + ".fixed.deb"
-        if fm.fileExists(atPath: fixedDeb) { try fm.removeItem(atPath: fixedDeb) }
-        try buildAR(members: ordered).write(to: URL(fileURLWithPath: fixedDeb))
-        return fixedDeb
+        return try Data(contentsOf: URL(fileURLWithPath: fixedControlPath))
     }
 
     // MARK: - ar 解析 / 生成（纯 Swift，无外部依赖）
@@ -147,7 +309,7 @@ enum DebControlPermissionRepair {
         return 3
     }
 
-    // MARK: - 工具定位
+    // MARK: - 工具定位（仅 xz/zst/bz2 回退路径使用）
 
     private static func locateTar() throws -> String {
         let candidates = [
