@@ -81,7 +81,6 @@ struct TerminalView: View {
                             .padding(.horizontal, 8)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .id("output")
-                            .textSelection(.enabled)
                         }
                         .onChange(of: outputText) { newValue in
                             if newValue.count > lastOutputLength {
